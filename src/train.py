@@ -76,6 +76,71 @@ def train_baseline():
     print(f"\nModel saved → {MODELS_DIR / 'logreg_baseline.pkl'}")
     return pipe, y_val, proba, metrics
 
+def train_lightgbm():
+    import lightgbm as lgb
+
+    t0 = time.time()
+    X_tr, X_val, y_tr, y_val, _, _ = get_splits()
+    num_cols, cat_cols = get_feature_lists(X_tr)
+
+    # LightGBM handles categoricals natively — encode them as pandas 'category'
+    X_tr  = X_tr.copy()
+    X_val = X_val.copy()
+    for c in cat_cols:
+        X_tr[c]  = X_tr[c].astype("category")
+        X_val[c] = X_val[c].astype("category")
+
+    # No scaler needed for trees — just impute NaNs (LightGBM tolerates NaN natively,
+    # but explicit imputation keeps preprocessing identical to the linear baseline)
+    from sklearn.impute import SimpleImputer
+    num_imputer  = SimpleImputer(strategy="median")
+    cat_imputer  = SimpleImputer(strategy="most_frequent")
+
+    if num_cols:
+        X_tr[num_cols]  = num_imputer.fit_transform(X_tr[num_cols])
+        X_val[num_cols] = num_imputer.transform(X_val[num_cols])
+    if cat_cols:
+        X_tr[cat_cols]  = cat_imputer.fit_transform(X_tr[cat_cols])
+        X_val[cat_cols] = cat_imputer.transform(X_val[cat_cols])
+        # after imputer returns object array, re-cast
+        for c in cat_cols:
+            X_tr[c]  = X_tr[c].astype("category")
+            X_val[c] = X_val[c].astype("category")
+
+    model = lgb.LGBMClassifier(
+        n_estimators=500,
+        learning_rate=0.05,
+        num_leaves=63,
+        min_child_samples=50,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        reg_alpha=0.1,
+        reg_lambda=0.1,
+        class_weight="balanced",
+        objective="binary",
+        n_jobs=-1,
+        random_state=42,
+        verbose=-1,
+    )
+
+    print("\nFitting LightGBM (~30-90s)...")
+    model.fit(
+        X_tr, y_tr,
+        eval_set=[(X_val, y_val)],
+        eval_metric="auc",
+        callbacks=[lgb.early_stopping(50, verbose=False), lgb.log_evaluation(0)],
+    )
+    print(f"Fit time: {time.time() - t0:.1f}s  |  best iteration: {model.best_iteration_}")
+
+    proba = model.predict_proba(X_val)[:, 1]
+    metrics = evaluate("LightGBM", y_val, proba, threshold=0.5)
+
+    joblib.dump(model, MODELS_DIR / "lgbm_v1.pkl")
+    print(f"Model saved → {MODELS_DIR / 'lgbm_v1.pkl'}")
+    return model, y_val, proba, metrics
+
 
 if __name__ == "__main__":
     train_baseline()
+    train_lightgbm()
+    
