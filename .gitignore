@@ -7,10 +7,6 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .ipynb_checkpoints/
-# Data — never commit Kaggle CSVs
-data/*.csv
-data/*.zip
-kaggle.json
 # Models & artifacts
 models/*.pkl
 models/*.joblib
